@@ -5,3 +5,14 @@ edition = "2024"
 
 [dependencies]
 lexopt = "0.3.1"
+
+[lints.clippy]
+# pedantic
+redundant_closure_for_method_calls = "warn"
+if_not_else = "warn"
+needless_borrow = "warn"
+str_to_string = "warn"
+to_string_in_format_args = "warn"
+too_many_arguments = "allow"
+unnecessary_to_owned = "warn"
+unwrap_used = "warn"

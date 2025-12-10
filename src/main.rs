@@ -1,3 +1,5 @@
+mod parse;
+
 use lexopt::ValueExt;
 
 struct Args {
@@ -65,41 +67,17 @@ fn usage() {
     std::process::exit(0);
 }
 
-
-fn adjust_width(width: usize) -> u32 {
-    match width {
-        1..=8 => 8,
-        9..=16 => 16,
-        17..=32 => 32,
-        33..=64 => 64,
-        _ => 64,
-    }
-}
-
 fn main() {
-    let mut args = parse_args().unwrap_or_else(|e| {
+    let args = parse_args().unwrap_or_else(|e| {
         eprintln!("Error parsing arguments: {}\n", e);
         usage();
         std::process::exit(1);
     });
 
-    let value = if args.input.starts_with("0x") {
-        let input = args.input.trim_start_matches("0x");
-        if args.width.is_none() {
-            args.width = Some(adjust_width(input.len().div_ceil(2) * 8));
-        }
-        u64::from_str_radix(input, 16).expect("Failed to parse hex input")
-    } else if args.input.starts_with("0o") {
-        u64::from_str_radix(args.input.trim_start_matches("0o"), 8).expect("Failed to parse octal input")
-    } else if args.input.starts_with("0b") {
-        let input = args.input.trim_start_matches("0b");
-        if args.width.is_none() {
-            args.width = Some(adjust_width(input.len().div_ceil(8) * 8));
-        }
-        u64::from_str_radix(input, 2).expect("Failed to parse binary input")
-    } else {
-        args.input.parse::<u64>().expect("Failed to parse decimal input")
-    };
+    let value = parse::parse(&args.input).unwrap_or_else(|e| {
+        eprintln!("Error parsing value: {}\n", e);
+        std::process::exit(1);
+    });
 
     let width = args.width.unwrap_or({
         if value > u32::MAX as u64 {
