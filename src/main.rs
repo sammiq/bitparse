@@ -6,12 +6,14 @@ struct Args {
     input: String,
     width: Option<u32>,
     unpack: Vec<u32>,
+    debug: bool,
 }
 
 fn parse_args() -> Result<Args, lexopt::Error> {
     let mut input = None;
     let mut width = None;
     let mut unpack = Vec::new();
+    let mut debug = false;
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -44,6 +46,9 @@ fn parse_args() -> Result<Args, lexopt::Error> {
                 }
                 unpack.sort();
             }
+            lexopt::Arg::Long("debug") => {
+                debug = true;
+            }
             lexopt::Arg::Long("help") => {
                 usage();
             }
@@ -55,6 +60,7 @@ fn parse_args() -> Result<Args, lexopt::Error> {
         input: input.ok_or("missing input argument")?,
         width,
         unpack,
+        debug,
     })
 }
 
@@ -68,11 +74,20 @@ fn usage() {
 }
 
 fn main() {
+    if let Err(e) = simple_logger::init() {
+        eprintln!("Error initializing logger: {}", e);
+        std::process::exit(1);
+    }
+
     let args = parse_args().unwrap_or_else(|e| {
         eprintln!("Error parsing arguments: {}\n", e);
         usage();
         std::process::exit(1);
     });
+
+    if args.debug {
+        log::set_max_level(log::LevelFilter::Debug);
+    }
 
     let value = parse::parse(&args.input).unwrap_or_else(|e| {
         eprintln!("Error parsing value: {}\n", e);

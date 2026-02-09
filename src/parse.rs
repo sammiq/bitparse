@@ -1,3 +1,5 @@
+use log::{debug, trace};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
     Unknown(char),
@@ -16,27 +18,33 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
     while let Some(c) = iter.next() {
         match c {
             '(' => {
+                trace!("push open parenthesis");
                 tokens.push(Token::OpenParen);
             }
             ')' => {
+                trace!("push close parenthesis");
                 tokens.push(Token::CloseParen);
             }
             '<' => {
                 if iter.peek() == Some(&'<') {
                     iter.next();
+                    trace!("push left shift operator");
                     tokens.push(Token::Operator("<<".to_owned()));
                 }
             }
             '>' => {
                 if iter.peek() == Some(&'>') {
                     iter.next();
+                    trace!("push right shift operator");
                     tokens.push(Token::Operator(">>".to_owned()));
                 }
             }
             '~' | '!' => {
+                trace!("push unary operator {}", c);
                 tokens.push(Token::UnaryOperator(c.to_string()));
             }
             '^' | '*' | '/' | '%' | '+' | '-' | '|' | '&' => {
+                trace!("push operator {}", c);
                 tokens.push(Token::Operator(c.to_string()));
             }
             'x' | 'o' | 'b' => {
@@ -71,6 +79,7 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
                         }
                     }
                 }
+                trace!("push number {}", value);
                 tokens.push(Token::Number(value));
             }
             'A'..='Z' | 'a'..='z' => {
@@ -88,12 +97,14 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
                         }
                     }
                 }
+                trace!("push identifier {}", value);
                 tokens.push(Token::Identifier(value));
             }
             ' ' | '\t' | '\n' | '\r' => {
                 //skip whitespace
             }
             _ => {
+                trace!("push unknown {}", c);
                 tokens.push(Token::Unknown(c));
             }
         }
@@ -114,11 +125,13 @@ pub fn parse(input: &str) -> Result<u64, String> {
     let mut operands = Vec::new();
     let mut prev_token = None;
     for token in &tokens {
+        debug!("processing token {:?}", token);
         match token {
-            Token::OpenParen => queue_operator(token, 100, &mut operators, &mut operands)?,
+            Token::OpenParen => queue_operator(token, 0, &mut operators, &mut operands)?,
             Token::CloseParen => {
                 let mut openned = false;
                 while let Some(op) = operators.pop() {
+                    debug!("popped operator {:?} from stack", op.token);
                     if let Token::OpenParen = op.token {
                         openned = true;
                     } else {
@@ -138,7 +151,10 @@ pub fn parse(input: &str) -> Result<u64, String> {
                 }
             }
             Token::Number(num_str) => match parse_number(num_str) {
-                Ok(num) => operands.push(num),
+                Ok(num) => {
+                    debug!("push operand {} onto stack", num);
+                    operands.push(num);
+                },
                 Err(_) => return Err(format!("Unrecognised number {}", num_str)),
             },
             Token::Identifier(_) => {
@@ -150,6 +166,7 @@ pub fn parse(input: &str) -> Result<u64, String> {
     }
 
     while let Some(op) = operators.pop() {
+        debug!("popped operator {:?} from stack", op.token);
         if let Token::OpenParen = op.token {
             return Err("Unexpected open bracket".into());
         }
@@ -157,6 +174,7 @@ pub fn parse(input: &str) -> Result<u64, String> {
     }
 
     if let Some(result) = operands.pop() {
+        debug!("popped final operand {} from stack", result);
         Ok(result)
     } else {
         Err("No input".into())
@@ -186,7 +204,8 @@ fn parse_number(input: &str) -> Result<u64, std::num::ParseIntError> {
 }
 
 fn apply_operator(op: &Operator, operands: &mut Vec<u64>) -> Result<(), String> {
-    let b = operands.pop().ok_or(format!("not enought operands for {:?}", op.token))?;
+    let b = operands.pop().ok_or(format!("not enough operands for {:?}", op.token))?;
+    debug!("popped operand {} from stack", b);
     if let Token::UnaryOperator(op_str) = &op.token {
         match op_str.as_str() {
             "~" => operands.push(!b),
@@ -194,8 +213,8 @@ fn apply_operator(op: &Operator, operands: &mut Vec<u64>) -> Result<(), String> 
             _ => return Err(format!("Unsupported operator {:?}", op.token)),
         }
     } else if let Token::Operator(op_str) = &op.token {
-        let a = operands.pop().ok_or(format!("not enought operands for {:?}", op.token))?;
-
+        let a = operands.pop().ok_or(format!("not enough operands for {:?}", op.token))?;
+        debug!("popped operand {} from stack", a);
         match op_str.as_str() {
             "*" => operands.push(a * b),
             "/" => {
@@ -238,16 +257,22 @@ fn operator_precedence(op_str: &str) -> i32 {
 }
 
 fn queue_operator(token: &Token, precedence: i32, operators: &mut Vec<Operator>, operands: &mut Vec<u64>) -> Result<(), String> {
-    while let Some(top_op) = operators.first() {
+    debug!("new operator is {:?} with precedence {}", token, precedence);
+
+    let mut status = Ok(());
+    while let Some(top_op) = operators.first() && status.is_ok() {
+        debug!("top operator on stack is {:?} with precedence {}", top_op.token, top_op.precedence);
         if precedence <= top_op.precedence {
             break;
         }
         let stack_op = operators.pop().expect("should have item");
-        apply_operator(&stack_op, operands)?;
+        debug!("popped operator {:?} from stack", stack_op.token);
+        status = apply_operator(&stack_op, operands);
     }
+    debug!("push operator {:?} onto stack", token);
     operators.push(Operator {
         token: token.clone(),
         precedence,
     });
-    Ok(())
+    status
 }
