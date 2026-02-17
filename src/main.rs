@@ -87,6 +87,8 @@ fn main() {
 
     if args.debug {
         log::set_max_level(log::LevelFilter::Debug);
+    } else {
+        log::set_max_level(log::LevelFilter::Info);
     }
 
     let value = parse::parse(&args.input).unwrap_or_else(|e| {
