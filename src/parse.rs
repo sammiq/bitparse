@@ -51,52 +51,12 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
                 //prefix for data types, then loop
             }
             '0'..='9' => {
-                let mut value = c.to_string();
-                if c == '0' {
-                    //we have a leading zero so check for prefix
-                    if let Some(cc) = iter.peek() {
-                        match cc {
-                            'b' | 'o' | 'x' => {
-                                value.push(*cc);
-                                iter.next();
-                            }
-                            _ => {
-                                //ignore and process below
-                            }
-                        }
-                    }
-                }
-                while let Some(cc) = iter.peek() {
-                    match cc {
-                        '0'..='9' | 'A'..='F' | 'a'..='f' => {
-                            //worry about validity during parse
-                            value.push(*cc);
-                            iter.next();
-                        }
-                        _ => {
-                            //ignore anything and process below
-                            break;
-                        }
-                    }
-                }
+                let value = lex_number(&mut iter, c);
                 trace!("push number {}", value);
                 tokens.push(Token::Number(value));
             }
             'A'..='Z' | 'a'..='z' => {
-                //loop until no longer alphabetic and add the whole thing as identifier
-                let mut value = c.to_string();
-                while let Some(cc) = iter.peek() {
-                    match cc {
-                        'A'..='Z' | 'a'..='z' => {
-                            value.push(*cc);
-                            iter.next();
-                        }
-                        _ => {
-                            //ignore anything and process below
-                            break;
-                        }
-                    }
-                }
+                let value = lex_identifier(&mut iter, c);
                 trace!("push identifier {}", value);
                 tokens.push(Token::Identifier(value));
             }
@@ -110,6 +70,61 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
         }
     }
     Ok(tokens)
+}
+
+fn lex_number(iter: &mut std::iter::Peekable<std::str::Chars<'_>>, c: char) -> String {
+    let mut value = c.to_string();
+    let mut is_prefixed = false;
+
+    if c == '0' {
+        //we have a leading zero so check for prefix
+        if let Some(cc) = iter.peek() {
+            match cc {
+                'b' | 'o' | 'x' => {
+                    is_prefixed = true;
+                    value.push(*cc);
+                    iter.next();
+                }
+                _ => {
+                    //ignore and process below
+                }
+            }
+        }
+    }
+    while let Some(cc) = iter.peek() {
+        match cc {
+            '0'..='9' | 'A'..='F' | 'a'..='f' => {
+                //worry about validity during parse
+                value.push(*cc);
+                iter.next();
+            }
+            '.' => {
+                if is_prefixed {
+                    break;
+                }
+                //worry about validity during parse
+                value.push(*cc);
+                iter.next();
+            }
+            _ => break,
+        }
+    }
+    value
+}
+
+fn lex_identifier(iter: &mut std::iter::Peekable<std::str::Chars<'_>>, c: char) -> String {
+    //loop until no longer alphabetic and add the whole thing as identifier
+    let mut value = c.to_string();
+    while let Some(cc) = iter.peek() {
+        match cc {
+            'A'..='Z' | 'a'..='z' => {
+                value.push(*cc);
+                iter.next();
+            }
+            _ => break,
+        }
+    }
+    value
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -151,11 +166,11 @@ pub fn parse(input: &str) -> Result<u64, String> {
                 }
             }
             Token::Number(num_str) => match parse_number(num_str) {
-                Ok(num) => {
+                Some(num) => {
                     debug!("push operand {} onto stack", num);
                     operands.push(num);
-                },
-                Err(_) => return Err(format!("Unrecognised number {}", num_str)),
+                }
+                None => return Err(format!("Unrecognised number {}", num_str)),
             },
             Token::Identifier(_) => {
                 //push onto function stack
@@ -185,22 +200,31 @@ fn is_prev_compatible(prev_token: Option<&Token>) -> bool {
     !(prev_token.is_none() || matches!(prev_token, Some(Token::OpenParen)) || matches!(prev_token, Some(Token::Operator(_))))
 }
 
-fn parse_number(input: &str) -> Result<u64, std::num::ParseIntError> {
-    let mut number = input;
-    let radix = if input.starts_with("0x") {
-        number = input.trim_start_matches("0x");
-        16
-    } else if input.starts_with("0o") {
-        number = input.trim_start_matches("00");
-        8
-    } else if input.starts_with("0b") {
-        number = input.trim_start_matches("0b");
-        2
+fn parse_number(input: &str) -> Option<u64> {
+    if input.contains('.') {
+        if input.ends_with("f") {
+            let number = input.strip_suffix("f").unwrap_or(input);
+            number.parse::<f32>().map(|f| f.to_bits() as u64).ok()
+        } else {
+            input.parse::<f64>().map(f64::to_bits).ok()
+        }
     } else {
-        10
-    };
+        let mut number = input;
+        let radix = if input.starts_with("0x") {
+            number = input.strip_prefix("0x").unwrap_or(input);
+            16
+        } else if input.starts_with("0o") {
+            number = input.strip_prefix("00").unwrap_or(input);
+            8
+        } else if input.starts_with("0b") {
+            number = input.strip_prefix("0b").unwrap_or(input);
+            2
+        } else {
+            10
+        };
 
-    u64::from_str_radix(number, radix)
+        u64::from_str_radix(number, radix).ok()
+    }
 }
 
 fn apply_operator(op: &Operator, operands: &mut Vec<u64>) -> Result<(), String> {
@@ -260,7 +284,9 @@ fn queue_operator(token: &Token, precedence: i32, operators: &mut Vec<Operator>,
     debug!("new operator is {:?} with precedence {}", token, precedence);
 
     let mut status = Ok(());
-    while let Some(top_op) = operators.first() && status.is_ok() {
+    while let Some(top_op) = operators.first()
+        && status.is_ok()
+    {
         debug!("top operator on stack is {:?} with precedence {}", top_op.token, top_op.precedence);
         if precedence <= top_op.precedence {
             break;
@@ -275,4 +301,85 @@ fn queue_operator(token: &Token, precedence: i32, operators: &mut Vec<Operator>,
         precedence,
     });
     status
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lex_number_from(input: &str) -> (String, String) {
+        let mut chars = input.chars().peekable();
+        let first = chars.next().expect("test input should not be empty");
+
+        let value = lex_number(&mut chars, first);
+
+        let rest = chars.collect();
+        (value, rest)
+    }
+
+    #[test]
+    fn lex_number_collects_decimal_digits() {
+        let (value, rest) = lex_number_from("12345+6");
+
+        assert_eq!(value, "12345");
+        assert_eq!(rest, "+6");
+    }
+
+    #[test]
+    fn lex_number_keeps_base_prefixes_with_leading_zero() {
+        for (input, expected) in [("0b1010 | 3", "0b1010"), ("0o755 & 0xff", "0o755"), ("0xDEad + 1", "0xDEad")] {
+            let (value, _) = lex_number_from(input);
+
+            assert_eq!(value, expected);
+        }
+    }
+
+    #[test]
+    fn lex_number_only_accepts_prefix_after_leading_zero() {
+        let (value, rest) = lex_number_from("10xFF");
+
+        assert_eq!(value, "10");
+        assert_eq!(rest, "xFF");
+    }
+
+    #[test]
+    fn lex_number_stops_before_non_digit_delimiters() {
+        for (input, expected_number, expected_rest) in [
+            ("42)", "42", ")"),
+            ("7<<2", "7", "<<2"),
+            ("0b1010_0101", "0b1010", "_0101"),
+            ("0xfaceg", "0xface", "g"),
+        ] {
+            let (value, rest) = lex_number_from(input);
+
+            assert_eq!(value, expected_number);
+            assert_eq!(rest, expected_rest);
+        }
+    }
+
+    #[test]
+    fn lex_number_accepts_an_interior_decimal_point() {
+        for (input, expected_number, expected_rest) in [("12.34+5", "12.34", "+5"), ("1.0f | 3", "1.0f", " | 3")] {
+            let (value, rest) = lex_number_from(input);
+
+            assert_eq!(value, expected_number);
+            assert_eq!(rest, expected_rest);
+        }
+    }
+
+    #[test]
+    fn lex_numbers_with_operators_in_expression() {
+        let tokens = lex("12.5 + 0xff & 0b1010").expect("lexing should succeed");
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Number("12.5".to_owned()),
+                Token::Operator("+".to_owned()),
+                Token::Number("0xff".to_owned()),
+                Token::Operator("&".to_owned()),
+                Token::Number("0b1010".to_owned()),
+            ]
+        );
+    }
 }
