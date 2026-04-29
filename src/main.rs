@@ -159,7 +159,7 @@ fn main() {
     println!();
     if !args.unpack.is_empty() {
         println!("Unpacked fields:");
-        for i in 0..args.unpack.len() - 1 {
+        for i in 0..args.unpack.len() {
             let this_offset = args.unpack[i];
             if this_offset >= width {
                 break;
