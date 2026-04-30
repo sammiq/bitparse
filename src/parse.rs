@@ -25,19 +25,15 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
                 trace!("push close parenthesis");
                 tokens.push(Token::CloseParen);
             }
-            '<' => {
-                if iter.peek() == Some(&'<') {
-                    iter.next();
-                    trace!("push left shift operator");
-                    tokens.push(Token::Operator("<<".to_owned()));
-                }
+            '<' if iter.peek() == Some(&'<') => {
+                iter.next();
+                trace!("push left shift operator");
+                tokens.push(Token::Operator("<<".to_owned()));
             }
-            '>' => {
-                if iter.peek() == Some(&'>') {
-                    iter.next();
-                    trace!("push right shift operator");
-                    tokens.push(Token::Operator(">>".to_owned()));
-                }
+            '>' if iter.peek() == Some(&'>') => {
+                iter.next();
+                trace!("push right shift operator");
+                tokens.push(Token::Operator(">>".to_owned()));
             }
             '~' | '!' => {
                 trace!("push unary operator {}", c);
